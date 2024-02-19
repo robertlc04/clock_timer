@@ -1,73 +1,84 @@
-use crate::prints::clock;
-use crate::prints::label;
-use std::{cell::Cell, thread::sleep, time::Duration};
 
-// General
-#[derive(Clone, Copy)]
-pub enum Mode {
+#[derive(Clone, PartialEq)]
+pub enum Modes {
     Clock,
-    Timer(u32),
-    Quit,
+    Timer(TimerData)
 }
 
-impl Mode {
-    pub fn call(self) -> String {
-        match self {
-            Mode::Clock => clock(),
-            Mode::Timer(t) => {
-                let hours = t / 60;
-                let mins = t - (hours * 60);
-                let rt: String;
-                if mins < 10 {
-                    if hours < 10 {
-                        rt = label(format!("0{}:0{}", hours, mins));
-                    } else {
-                        rt = label(format!("{}:0{}", hours, mins));
-                    }
-                } else {
-                    if hours < 10 {
-                        rt = label(format!("0{}:{}", hours, mins));
-                    } else {
-                        rt = label(format!("{}:{}", hours, mins));
-                    }
-                }
-                rt
-            }
-            Mode::Quit => "Quit".to_string(),
+impl Modes {
+    pub fn switch_mode(&mut self) {
+        *self = match self {
+            Modes::Clock => Modes::Timer(TimerData::new()),
+            Modes::Timer(_) => Modes::Clock
         }
     }
 }
 
-// Timer
-pub enum TimerActions {
-    Start,
-    Stop,
-    IncreaseSeconds,
-    IncreaseMinuts,
-    DecreaseSeconds,
-    DecreaseMinuts,
-}
+#[derive(Clone, PartialEq)]
+pub struct TimerData {
+    data: u32
+} 
 
-pub fn timer(timer_action: TimerActions, time: &Cell<u32>) {
-    match timer_action {
-        TimerActions::Start => {
-            if time.get() > 0 {
-                time.set(time.get() - 1);
-                sleep(Duration::from_secs(1));
+impl TimerData {
+    pub fn new() -> Self {
+        Self {
+            data: 0
+        }
+    }
+    pub fn format(value: u32) -> String {
+        let hours = value / 60;
+        let mins = value - (hours * 60);
+        let rt: String;
+        if mins < 10 {
+            if hours < 10 {
+                rt = format!("0{}:0{}", hours, mins);
+            } else {
+                rt = format!("{}:0{}", hours, mins);
+            }
+        } else {
+            if hours < 10 {
+                rt = format!("0{}:{}", hours, mins);
+            } else {
+                rt = format!("{}:{}", hours, mins);
             }
         }
-        TimerActions::IncreaseSeconds => time.set(time.get() + 1),
-        TimerActions::IncreaseMinuts => time.set(time.get() + 60),
-        TimerActions::DecreaseSeconds => {
-            if time.get() > 0 {
-                time.set(time.get() - 1)
-            }
-        },
-        TimerActions::DecreaseMinuts => {
-            if time.get() > 0 {
-                time.set(time.get() - 60)
-            }
-        },
-        _ => {}
+        rt
+    }
+}
+
+impl TimerData {
+    pub fn increase(&mut self,sum_num: u32) {
+        self.data = self.data + sum_num
+    }
+
+    pub fn decrease(&mut self,dec_num: u32) {
+        if dec_num > self.data {
+            self.data = 0
+        } else {
+            self.data = self.data - dec_num
+        }
+    }
+
+    pub fn get(&self) -> u32 {
+        self.data
+    }
+
+    pub fn set(&mut self, num: u32) {
+        self.data = num
+    }
+}
+
+#[derive(PartialEq)]
+pub enum TimerStatus {
+    Running,
+    Stop
+}
+
+impl TimerStatus {
+    pub fn start() -> TimerStatus {
+        TimerStatus::Running
+    }
+    pub fn stop() -> TimerStatus {
+        TimerStatus::Stop
     }
 }

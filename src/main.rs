@@ -1,12 +1,14 @@
-use std::cell::Cell;
-use std::{sync::mpsc, thread::sleep, time::Duration};
+use std::{char, thread::sleep, time::Duration};
 
-use modes::*;
-use ncurses::{getch, *};
-use prints::print_actual_time;
+use ncurses::*;
+use utils::label;
+use clock::clock;
 
+use modes::{Modes,TimerData,TimerStatus};
+
+mod clock;
+mod utils;
 mod modes;
-mod prints;
 
 // Colors
 static COLOR_BACKGROUND: i16 = 16;
@@ -14,131 +16,66 @@ static COLOR_FOREGROUND: i16 = 17;
 
 static COLOR_PAIR_DEFAULT: i16 = 1;
 
-
 fn main() {
+
     init_tui();
+    let mut actual_mode = Modes::Clock;
+    let mut timer_data = TimerData::new();
+    let mut timer_status = TimerStatus::Stop;
+    let mut timer_count: f32 = 0.0;
+    let mut max_stdscr_x = 0;
+    let mut max_stdscr_y = 0;
 
+    getmaxyx(stdscr(),&mut max_stdscr_y,&mut max_stdscr_x);
 
-    let (sender, receiver) = mpsc::channel::<Option<Mode>>();
-    let time_thread = std::thread::spawn(|| {
-        print_actual_time(receiver);
-    });
-
-    // let actual: Mode = Action::Clock;
-    let mut actual = Mode::Clock;
-    let _ = sender.send(Some(actual));
-    let mut timer_status = TimerActions::Stop;
-    let data_timer: Cell<u32> = Cell::new(0);
-
-    bkgd(COLOR_PAIR(COLOR_PAIR_DEFAULT));
-
+    let main = newwin(5,40,max_stdscr_y/2-5,max_stdscr_x/2-20);
+    // let menu_timer = newwin(5,50,0,0);
+    
+    refresh();
 
     loop {
         let ch = getch();
-
+        
         if ch == -1 {
-            match actual {
-                Mode::Clock => {
-                    sleep(Duration::from_millis(100));
-                    continue;
+            if actual_mode == Modes::Clock {
+                timer_status = TimerStatus::stop();
+                timer_data.set(0);
+                print_mode(main,None);
+            } else {
+                if timer_status == TimerStatus::Running && timer_data.get() != 0 {
+                    timer_count+= 0.1;
+                    let timer_count_str = format!("{:.1}",timer_count).chars().next().unwrap().to_string();
+                    if timer_count_str.parse::<i32>().unwrap() == 1  {
+                        timer_data.decrease(1);
+                        timer_count = 0.0;
+                    }
+                } else {
+                    timer_status = TimerStatus::stop()
                 }
-                Mode::Timer(_) => match timer_status {
-                    TimerActions::Start => {
-                        if data_timer.get() == 0 {
-                            timer_status = TimerActions::Stop;
-                            actual = Mode::Timer(data_timer.get());
-                            let _ = sender.send(Some(actual));
-                            continue;
-                        }
-                        timer(TimerActions::Start, &data_timer);
-                        actual = Mode::Timer(data_timer.get());
-                        let _ = sender.send(Some(actual));
-                        continue;
-                    }
-                    _ => {
-                        sleep(Duration::from_millis(100));
-                        continue;
-                    }
-                },
-                _ => {}
+                print_mode(main,Some(&timer_data));
             }
+            refresh();
+            sleep(Duration::from_millis(100));
+            continue;
         }
-
-        match char::from_u32(ch as u32).unwrap() {
-            // Select Mode
-            'c' => match actual {
-                Mode::Timer(_) => {
-                    data_timer.set(0);
-                    actual = Mode::Clock;
-                }
-                _ => {}
-            },
-            't' => match actual {
-                Mode::Clock => {
-                    actual = Mode::Timer(0);
-                    timer_status = TimerActions::Stop;
-                }
-                _ => {}
-            },
-            // Timer Keybinds
-            's' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::IncreaseSeconds, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                }
-                _ => {}
-            },
-            'm' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::IncreaseMinuts, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                }
-                _ => {}
-            },
-            'S' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::DecreaseSeconds, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                }
-                _ => {}
-            },
-            'M' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::DecreaseMinuts, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                }
-                _ => {}
-            },
-            'p' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::Stop, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                    timer_status = TimerActions::Stop;
-                }
-                _ => {}
-            },
-            '\n' => match actual {
-                Mode::Timer(_) => {
-                    timer(TimerActions::Start, &data_timer);
-                    actual = Mode::Timer(data_timer.get());
-                    timer_status = TimerActions::Start;
-                }
-                _ => {}
-            },
-            // Quit Keybind
-            'q' => match actual {
-                _ => {
-                    let _ = sender.send(Some(Mode::Quit));
-                    break;
-                }
-            },
+        
+        let ch = char::from_u32(ch as u32).unwrap();
+        match ch {
+            'q' => break,
+            '\t' => actual_mode.switch_mode(),
+            '\n' => timer_status = TimerStatus::start(),
+            ' ' => timer_status = TimerStatus::stop(),
             _ => {}
         }
+        if actual_mode != Modes::Clock {
+            timer_shortkuts(ch, &mut timer_data)
+        }
 
-        let _ = sender.send(Some(actual));
     }
 
-    time_thread.join().unwrap();
+    // mvwin(menu_timer,2,2);
+    // print_mode(main);
+    
 
     endwin();
 }
@@ -153,4 +90,25 @@ fn init_tui() {
     init_color(COLOR_BACKGROUND, 0, 43 * 4, 54 * 4);
     init_color(COLOR_FOREGROUND, 142 * 4, 161 * 4, 161 * 4);
     init_pair(COLOR_PAIR_DEFAULT, COLOR_FOREGROUND, COLOR_BACKGROUND);
+}
+
+fn print_mode(win: WINDOW, timer_data: Option<&TimerData>) {
+    wclear(win);
+    if timer_data.is_none() {
+        waddstr(win,&label(clock()));
+    } else {
+        waddstr(win,&label(TimerData::format(timer_data.unwrap().get())));
+    }
+    wrefresh(win);
+}
+
+fn timer_shortkuts(ch: char,timer_data: &mut TimerData) {
+    match ch {
+        's' => timer_data.increase(1),
+        'm' => timer_data.increase(60),
+        'r' => timer_data.set(0),
+        'S' => timer_data.decrease(1),
+        'M' => timer_data.decrease(60),
+        _ => {}
+    }
 }
